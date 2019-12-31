@@ -11,16 +11,11 @@ NON_ALNUM = re.compile(r"[^\w\s]")
 PARSER = WiktionaryParser()
 
 
-def get_html(url: str) -> BeautifulSoup:
+def get_page(url: str) -> BeautifulSoup:
     """Open the url given and return a BeautifulSoup object"""
     html = urlopen(url)
     bs = BeautifulSoup(html.read(), "html.parser")
     return bs
-
-
-def get_wikipedia() -> BeautifulSoup:
-    """Function for testing. Returns BeautifulSoup object for a wikipedia page."""
-    return get_html("https://en.wikipedia.org/wiki/Red-tailed_tropicbird")
 
 
 def get_wiki_body(bs: BeautifulSoup) -> str:
@@ -41,9 +36,8 @@ def get_words(body: str) -> list:
     return words
 
 
-def query_wiktionary(word) -> str:
+def _query_wiktionary(word) -> str:
     """Query Wiktionary for the definition of word"""
-    print(f"Getting definition for '{word}'")
     entry = PARSER.fetch(word, language=LANGUAGE)
 
     # If an empty list is returned then there is a Wiktionary page but no entry under English
@@ -67,10 +61,20 @@ def query_wiktionary(word) -> str:
     return first_minor_def
 
 
+def query_wiktionary(word) -> str:
+    """Try lowercase if first attempt doesn't find a definition"""
+    result = _query_wiktionary(word)
+    if result is None:
+        lower = word.lower()
+        if lower != word:
+            result = _query_wiktionary(lower)
+    return result
+
+
 def as_flashcard(row: pd.Series) -> str:
     """Take in a DataFrame row with 'word' and 'definition' columns available and create a
     line representing an Anki flashcard (trivial)"""
-    return "{x.word}; {x.definition}".format(x=row)
+    return "{0.word}; {0.definition}".format(row)
 
 
 def write_out(series: pd.Series, loc: str) -> None:
@@ -79,21 +83,9 @@ def write_out(series: pd.Series, loc: str) -> None:
         f.write("\n".join(series.values))
 
 
-if __name__ == "__main__":
-    # Simple test-case
-
-    wiki = get_wikipedia()
-    body = get_wiki_body(wiki)
-    words = get_words(body)
-    df = pd.DataFrame(dict(word=words))
-    df = df.drop_duplicates("word")
-    df = df.head(200)
-
-    df["word"] = df["word"].apply(remove_punctuation)
-    df["definition"] = df["word"].apply(query_wiktionary)
-    df["flashcard"] = df.apply(as_flashcard, 1)
-
-    # Save definitions
-    write_out(series=df["flashcard"], loc="test.txt")
-
-    print("Done!")
+def remove_common(df, top=5000):
+    """Remove words from df which occur in the top n most common English words"""
+    common = pd.read_csv("../data/english_10000.csv").head(n=top)
+    mask = df["word"].isin(common["word"])
+    mask |= df["word"].str.lower().isin(common["word"])
+    return df[~mask]
